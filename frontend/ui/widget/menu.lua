@@ -989,10 +989,11 @@ function Menu:init()
             -- add long press on "Right" key
             self.key_events.Right = { { "Right" } }
         end
-        -- shortcut icon is not needed for touch device
-        if self.is_enable_shortcut then
-            self.key_events.SelectByShortCut = { { self.item_shortcuts } }
-        end
+    end
+    -- Shortcut icons are shown whenever there's a keyboard (even without a D-pad,
+    -- e.g. the BlackBerry Q10): make them work too.
+    if self.is_enable_shortcut then
+        self.key_events.SelectByShortCut = { { self.item_shortcuts } }
     end
 
     if self.item_table.current then
