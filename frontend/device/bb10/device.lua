@@ -52,10 +52,13 @@ function Device:init()
                 local state = ffi.C.NAVIGATOR_WINDOW_FULLSCREEN
                 if ev.value == state then
                     bb10.setKeepAwake(true)
+                    bb10.grabSideKeys(true)
                     this.device.screen:_updateWindow()
                 else
                     -- Minimized to an active frame (or hidden): we may be killed without notice.
                     bb10.setKeepAwake(false)
+                    -- Give the volume keys back to the system.
+                    bb10.grabSideKeys(false)
                     this.device.input:resetState()
                     UIManager:broadcastEvent(Event:new("FlushSettings"))
                 end
@@ -65,6 +68,8 @@ function Device:init()
         end,
     }
     Generic.init(self)
+    -- Volume keys turn pages instead of changing the volume (while we're in the foreground).
+    bb10.grabSideKeys(true)
 end
 
 function Device:exit()
