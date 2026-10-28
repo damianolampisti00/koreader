@@ -150,6 +150,7 @@ local Device = {
     -- device/<devicetype>/device.lua file
     -- (these are functions!)
     isAndroid = no,
+    isBB10 = no,
     isCervantes = no,
     isKindle = no,
     isKobo = no,

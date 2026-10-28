@@ -37,6 +37,11 @@ local function probeDevice()
         return require("device/cervantes/device")
     end
 
+    -- BlackBerry 10 (QNX: LuaJIT says "POSIX"), recognized by its PPS tree.
+    if require("ffi").os == "POSIX" and lfs.attributes("/pps/services") then
+        return require("device/bb10/device")
+    end
+
     -- add new ports here:
     --
     -- if --[[ implement a proper test instead --]] false then
