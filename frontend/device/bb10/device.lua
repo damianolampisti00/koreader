@@ -1,6 +1,5 @@
 local Event = require("ui/event")
 local Generic = require("device/generic/device")
-local UIManager
 local bb10 = require("ffi/bb10")
 local ffi = require("ffi")
 local logger = require("logger")
@@ -37,7 +36,6 @@ local Device = Generic:extend{
 }
 
 function Device:init()
-    UIManager = require("ui/uimanager")
     self.screen = require("ffi/framebuffer_bb10"):new{device = self, debug = logger.dbg}
     self.powerd = require("device/bb10/powerd"):new{device = self}
     local bb10_input = require("ffi/input_bb10")
@@ -45,6 +43,7 @@ function Device:init()
         device = self,
         event_map = require("device/bb10/event_map"),
         handleMiscEv = function(this, ev)
+            local UIManager = require("ui/uimanager")
             if ev.code == bb10_input.MSC_EXIT then
                 logger.info("BB10: navigator exit")
                 UIManager:broadcastEvent(Event:new("FlushSettings"))
