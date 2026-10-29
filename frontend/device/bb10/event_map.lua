@@ -48,8 +48,9 @@ return {
     [0xF0FF] = "Del", -- KEYCODE_DELETE
     [0xF0E1] = "Shift", -- KEYCODE_LEFT_SHIFT
     [0xF0E2] = "Shift", -- KEYCODE_RIGHT_SHIFT
-    [0xF0E9] = "Alt", -- KEYCODE_LEFT_ALT
-    [0xF0EA] = "Alt", -- KEYCODE_RIGHT_ALT
+    -- NOTE: no Alt: on the Q10 it only selects the symbols layer, and input_bb10 already
+    --       sends the resulting symbol (an Alt modifier would stop InputText from typing it).
+    [0xF0D3] = "Sym", -- the Q10's "$"/sym key (not in sys/keycodes.h)
     [0xF052] = "Up", -- KEYCODE_UP
     [0xF054] = "Down", -- KEYCODE_DOWN
     [0xF051] = "Left", -- KEYCODE_LEFT
