@@ -4,8 +4,8 @@
     <name>KOReader</name>
     <versionNumber>@VERSION@</versionNumber>
     <buildId>@BUILD_ID@</buildId>
-    <description>KOReader document viewer (BlackBerry 10 port)</description>
-    <author>KOReader BB10 port</author>
+    <description>KOReader document viewer (unofficial BlackBerry 10 port)</description>
+    <author>KOReader BB10 port (unofficial)</author>
     <initialWindow>
         <autoOrients>false</autoOrients>
         <systemChrome>none</systemChrome>
