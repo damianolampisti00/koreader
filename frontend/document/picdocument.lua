@@ -16,6 +16,7 @@ function PicDocument:init()
     if not pic then pic = require("ffi/pic") end
     -- pic.color needs to be true before opening document to allow toggling color
     pic.color = CanvasContext.is_color_rendering_enabled
+    pic.bgr = pic.color and CanvasContext.is_bgr
     local ok
     ok, self._document = pcall(pic.openDocument, self.file)
     if not ok then

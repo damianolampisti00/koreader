@@ -118,6 +118,7 @@ function RenderImage:renderJpegImageDataWithTurboJpeg(data, size, width, height)
     end
     if not Pic then Pic = require("ffi/pic") end
     Pic.color = Device:hasColorScreen()
+    Pic.bgr = Pic.color and Device:hasBGRFrameBuffer()
     local ok, jpeg = pcall(Pic.openJPGDocumentFromData, data, size)
     if not ok then
         logger.warn("failed rendering image (TurboJPEG):", jpeg)
@@ -146,6 +147,7 @@ function RenderImage:renderGifImageDataWithGifLib(data, size, want_frames, width
         return
     end
     if not Pic then Pic = require("ffi/pic") end
+    Pic.bgr = Device:hasColorScreen() and Device:hasBGRFrameBuffer()
     local ok, gif = pcall(Pic.openGIFDocumentFromData, data, size)
     logger.dbg("Pic.openGIFDocumentFromData", ok)
     if not ok then
