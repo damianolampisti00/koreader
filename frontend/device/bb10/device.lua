@@ -1,6 +1,7 @@
 local Event = require("ui/event")
 local Generic = require("device/generic/device")
 local bb10 = require("ffi/bb10")
+local cover = require("device/bb10/cover")
 local ffi = require("ffi")
 local logger = require("logger")
 
@@ -61,15 +62,31 @@ function Device:init()
                     bb10.grabSideKeys(false)
                     this.device.input:resetState()
                     UIManager:broadcastEvent(Event:new("FlushSettings"))
+                    -- Normally ready already: only re-rendered if something changed.
+                    cover:start()
                 end
+            elseif ev.code == bb10_input.MSC_WINDOW_COVER then
+                -- Comes once the event loop runs (the UI is up), with the active frame's size.
+                cover:start()
             elseif ev.code == bb10_input.MSC_LOW_MEMORY then
                 UIManager:broadcastEvent(Event:new("FlushSettings"))
             end
         end,
     }
     Generic.init(self)
+    -- After Generic.init, which applies night mode while the "device" module is still loading.
+    self.screen.onNightModeChanged = function()
+        local UIManager = require("ui/uimanager")
+        UIManager:unschedule(cover.update)
+        UIManager:scheduleIn(0.5, cover.update, cover)
+    end
     -- Volume keys turn pages instead of changing the volume (while we're in the foreground).
     bb10.grabSideKeys(true)
+end
+
+-- The active frame shows the open book.
+function Device:notifyBookState(title, document)
+    cover:setBook(title, document)
 end
 
 function Device:exit()
