@@ -23,4 +23,6 @@
     <permission system="true">run_native</permission>
     <permission>access_shared</permission>
     <permission>access_internet</permission>
+    <!-- Read aloud goes on with the screen off / minimized. -->
+    <permission>run_when_backgrounded</permission>
 </qnx>

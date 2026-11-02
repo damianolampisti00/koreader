@@ -174,6 +174,7 @@ local order = {
         "long_press",
     },
     tools = {
+        "read_aloud",
         "read_timer",
         "calibre",
         "exporter",
