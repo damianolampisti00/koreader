@@ -54,7 +54,7 @@ static void *engine;
 static int running;
 static struct item *head, *tail;
 static int speaking = -1;              /* id being spoken, or -1 */
-static tts_param_t pending[3];         /* parameter changes, applied between utterances */
+static tts_param_t pending[4];         /* parameter changes, applied between utterances */
 static int npending;
 #define MAX_EVENTS 64
 static kotts_event_t events[MAX_EVENTS];
@@ -108,7 +108,7 @@ static void *work(void *arg)
     pthread_mutex_lock(&lock);
     while (running) {
         if (npending) {
-            tts_param_t p[3];
+            tts_param_t p[4];
             int n = npending;
             memcpy(p, pending, sizeof p);
             npending = 0;
@@ -196,17 +196,36 @@ int kotts_init(const char *data, const char *voice, int rate, int pitch, int vol
     return 0;
 }
 
+static int pending_index(int id)
+{
+    for (int i = 0; i < npending; i++)
+        if (pending[i].id == id)
+            return i;
+    return npending++;
+}
+
 /* Change the rate/pitch/volume (percents, 0 = unchanged), from the next utterance. */
 void kotts_set_params(int rate, int pitch, int volume)
 {
     pthread_mutex_lock(&lock);
-    npending = 0;
     if (rate)
-        set_param(&pending[npending++], TTS_RATE, rate);
+        set_param(&pending[pending_index(TTS_RATE)], TTS_RATE, rate);
     if (pitch)
-        set_param(&pending[npending++], TTS_PITCH, pitch);
+        set_param(&pending[pending_index(TTS_PITCH)], TTS_PITCH, pitch);
     if (volume)
-        set_param(&pending[npending++], TTS_VOLUME, volume);
+        set_param(&pending[pending_index(TTS_VOLUME)], TTS_VOLUME, volume);
+    pthread_cond_signal(&wake);
+    pthread_mutex_unlock(&lock);
+}
+
+/* Change the voice (e.g. "ava": its data must be mounted), from the next utterance. */
+void kotts_set_voice(const char *voice)
+{
+    pthread_mutex_lock(&lock);
+    tts_param_t *p = &pending[pending_index(TTS_VOICE)];
+    memset(p, 0, sizeof *p);
+    p->id = TTS_VOICE;
+    strncpy(p->v.s, voice, sizeof p->v.s - 1);
     pthread_cond_signal(&wake);
     pthread_mutex_unlock(&lock);
 }

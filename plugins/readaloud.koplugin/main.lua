@@ -16,6 +16,7 @@ if not (Device.isBB10 and Device:isBB10()) then
 end
 
 local Dispatcher = require("dispatcher")
+local bb10 = require("ffi/bb10")
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -29,6 +30,7 @@ ffi.cdef[[
 typedef struct { int id; int what; } kotts_event_t;
 int kotts_init(const char *, const char *, int, int, int);
 void kotts_set_params(int, int, int);
+void kotts_set_voice(const char *);
 int kotts_speak(int, const char *);
 void kotts_stop(void);
 int kotts_poll(kotts_event_t *, int);
@@ -49,22 +51,82 @@ local engine = {
     events = ffi.new("kotts_event_t[64]"),
 }
 
---- The voice set in the system's settings: the only one whose data is mounted (e.g. ITI/alice).
-local function systemVoice()
+-- Nuance language codes for a language (ISO 639-1, and region if any), most fitting first.
+local NUANCE_LANGUAGES = {
+    it = { "ITI" },
+    en = { "ENU", "ENG", GB = { "ENG", "ENU" }, UK = { "ENG", "ENU" } },
+    fr = { "FRF", "FRC", CA = { "FRC", "FRF" } },
+    de = { "GED" },
+    es = { "SPE", "SPM", MX = { "SPM", "SPE" } },
+    pt = { "PTP", "PTB", BR = { "PTB", "PTP" } },
+    ru = { "RUR" },
+    pl = { "PLP" },
+    nl = { "DUN" },
+    nb = { "NON" }, no = { "NON" }, nn = { "NON" },
+    ja = { "JPJ" },
+    ko = { "KOK" },
+    zh = { "MNC", "MNT", "CAH", TW = { "MNT", "MNC" }, HK = { "CAH", "MNT" } },
+}
+-- ISO 639-2 codes (some books use them).
+local ISO639_2 = { ita = "it", eng = "en", fre = "fr", fra = "fr", ger = "de", deu = "de", spa = "es",
+    por = "pt", rus = "ru", pol = "pl", dut = "nl", nld = "nl", nor = "nb", nob = "nb", jpn = "ja",
+    kor = "ko", chi = "zh", zho = "zh" }
+
+--- The voices whose data is mounted: { {voice = "alice", lang = "ITI"}, ... }. The system mounts
+-- only the one chosen in its settings; more can be mounted as root (see the port's README).
+local function availableVoices()
+    local voices = {}
     local lfs = require("libs/libkoreader-lfs")
     local ok, iter, dir_obj = pcall(lfs.dir, VOICES_DIR)
-    if ok then
-        for lang in iter, dir_obj do
-            if lang ~= "." and lang ~= ".." and lang ~= "common" then
-                for voice in lfs.dir(VOICES_DIR .. "/" .. lang) do
+    if not ok then return voices end
+    for lang in iter, dir_obj do
+        if lang:match("^%u%u%u$") then
+            local ok2, iter2, dir_obj2 = pcall(lfs.dir, VOICES_DIR .. "/" .. lang)
+            if ok2 then
+                for voice in iter2, dir_obj2 do
                     if voice ~= "." and voice ~= ".." then
-                        return voice, lang
+                        table.insert(voices, { voice = voice, lang = lang })
                     end
                 end
             end
         end
     end
-    return "alice", "ITI"
+    table.sort(voices, function(a, b) return a.lang < b.lang end)
+    return voices
+end
+
+--- Language & region of a language tag ("it", "en-GB", "pt_BR", "eng"…).
+local function parseLanguage(tag)
+    if type(tag) ~= "string" then return end
+    local lang, region = tag:lower():match("^(%a+)[-_]?(%a*)")
+    if not lang then return end
+    lang = ISO639_2[lang] or lang
+    return lang, region ~= "" and region:upper() or nil
+end
+
+--- The device's language (from LANG, or the region set in the system's settings).
+local function deviceLanguage()
+    local tag = os.getenv("LANG")
+    if not tag or tag == "" or tag == "C" then
+        local f = io.open("/pps/services/locale/settings")
+        if f then
+            tag = f:read("*a"):match("region::(%S+)")
+            f:close()
+        end
+    end
+    return tag
+end
+
+--- The best mounted voice for a language tag, or nil.
+local function voiceForLanguage(tag, voices)
+    local lang, region = parseLanguage(tag)
+    local codes = lang and NUANCE_LANGUAGES[lang]
+    if not codes then return end
+    for _, code in ipairs(region and codes[region] or codes) do
+        for _, v in ipairs(voices) do
+            if v.lang == code then return v end
+        end
+    end
 end
 
 local function startEngine(rate, pitch)
@@ -79,7 +141,9 @@ local function startEngine(rate, pitch)
         end
         engine.lib = lib
     end
-    engine.voice, engine.language = systemVoice()
+    local voices = availableVoices()
+    local v = voiceForLanguage(deviceLanguage(), voices) or voices[1] or { voice = "alice", lang = "ITI" }
+    engine.voice = v.voice
     local ret = engine.lib.kotts_init(nil, engine.voice, rate, pitch, 100)
     if ret ~= 0 then
         engine.error = T("kotts_init: %1", ret)
@@ -292,9 +356,10 @@ function ReadAloud:start(page, first)
         return
     end
     self:_cancel()
+    self:selectVoice()
     self:loadPage(page or self.ui:getCurrentPage(), nil, first)
     self.current = nil
-    self.state = "reading"
+    self:setState("reading")
     self:feed()
     UIManager:scheduleIn(POLL_INTERVAL, self.poll_task)
 end
@@ -305,7 +370,7 @@ function ReadAloud:pause()
     local s = self.current
     self.resume_at = s and { page = s.page, index = s.index } or { page = self.page, index = 1 }
     self:_cancel()
-    self.state = "paused"
+    self:setState("paused")
 end
 
 function ReadAloud:resume()
@@ -320,9 +385,46 @@ end
 
 function ReadAloud:stop()
     self:_cancel()
-    self.state = "stopped"
+    self:setState("stopped")
     self.resume_at = nil
     self.current = nil
+end
+
+--- The voice to read this book with: the chosen one, or (automatic) the one for the book's
+-- language, else for the device's language.
+function ReadAloud:bookVoice()
+    local voices = availableVoices()
+    local chosen = G_reader_settings:readSetting("readaloud_voice", "auto")
+    if chosen ~= "auto" then
+        for _, v in ipairs(voices) do
+            if v.voice == chosen then return v.voice end
+        end
+    end
+    local props = self.ui.doc_props or {}
+    local v = voiceForLanguage(props.language, voices) or voiceForLanguage(deviceLanguage(), voices)
+    return v and v.voice or engine.voice
+end
+
+function ReadAloud:selectVoice()
+    local voice = self:bookVoice()
+    if voice and voice ~= engine.voice then
+        logger.info("ReadAloud: voice", voice)
+        engine.lib.kotts_set_voice(voice)
+        engine.voice = voice
+    end
+end
+
+-- The middle side key is play/pause while reading (or paused), even with the screen off.
+function ReadAloud:setState(state)
+    self.state = state
+    bb10.setMediaPlayPause(state ~= "stopped")
+end
+
+function ReadAloud:onMediaPlayPause()
+    if self.state ~= "stopped" then
+        self:onReadAloudToggle()
+        return true
+    end
 end
 
 function ReadAloud:onReadAloudToggle()
@@ -385,6 +487,31 @@ function ReadAloud:showSpin(key, title, min, max)
     })
 end
 
+function ReadAloud:voiceMenu()
+    local function choose(value)
+        G_reader_settings:saveSetting("readaloud_voice", value)
+        if self.state == "reading" then
+            self:start(self.current and self.current.page, self.current and self.current.index)
+        end
+    end
+    local items = {
+        {
+            text = _("Automatic (the book's language)"),
+            checked_func = function() return G_reader_settings:readSetting("readaloud_voice", "auto") == "auto" end,
+            callback = function() choose("auto") end,
+            separator = true,
+        },
+    }
+    for _, v in ipairs(availableVoices()) do
+        table.insert(items, {
+            text = T("%1 (%2)", v.voice:gsub("^%l", string.upper), v.lang),
+            checked_func = function() return G_reader_settings:readSetting("readaloud_voice") == v.voice end,
+            callback = function() choose(v.voice) end,
+        })
+    end
+    return items
+end
+
 function ReadAloud:addToMainMenu(menu_items)
     menu_items.read_aloud = {
         sorting_hint = "tools",
@@ -429,10 +556,17 @@ function ReadAloud:addToMainMenu(menu_items)
             },
             {
                 text_func = function()
-                    local voice = engine.voice or systemVoice()
-                    return T(_("Voice: %1 (set in the BlackBerry settings)"), voice:gsub("^%l", string.upper))
+                    local chosen = G_reader_settings:readSetting("readaloud_voice", "auto")
+                    local voice = self:bookVoice() or "?"
+                    voice = voice:gsub("^%l", string.upper)
+                    if chosen == "auto" then
+                        return T(_("Voice: %1 (book language)"), voice)
+                    end
+                    return T(_("Voice: %1"), voice)
                 end,
-                enabled = false,
+                sub_item_table_func = function()
+                    return self:voiceMenu()
+                end,
             },
         },
     }

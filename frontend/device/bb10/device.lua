@@ -51,20 +51,23 @@ function Device:init()
                 UIManager:quit()
             elseif ev.code == bb10_input.MSC_WINDOW_STATE then
                 local state = ffi.C.NAVIGATOR_WINDOW_FULLSCREEN
+                bb10.updateSideKeys()
                 if ev.value == state then
                     bb10.setKeepAwake(true)
-                    bb10.grabSideKeys(true)
                     this.device.screen:_updateWindow()
                 else
                     -- Minimized to an active frame (or hidden): we may be killed without notice.
                     bb10.setKeepAwake(false)
-                    -- Give the volume keys back to the system.
-                    bb10.grabSideKeys(false)
                     this.device.input:resetState()
                     UIManager:broadcastEvent(Event:new("FlushSettings"))
                     -- Normally ready already: only re-rendered if something changed.
                     cover:start()
                 end
+            elseif ev.code == bb10_input.MSC_WINDOW_ACTIVE then
+                -- Screen off/on: give the volume keys back to the system / take them.
+                bb10.updateSideKeys()
+            elseif ev.code == bb10_input.MSC_MEDIA_PLAYPAUSE then
+                UIManager:broadcastEvent(Event:new("MediaPlayPause"))
             elseif ev.code == bb10_input.MSC_WINDOW_COVER then
                 -- Comes once the event loop runs (the UI is up), with the active frame's size.
                 cover:start()
@@ -81,7 +84,7 @@ function Device:init()
         UIManager:scheduleIn(0.5, cover.update, cover)
     end
     -- Volume keys turn pages instead of changing the volume (while we're in the foreground).
-    bb10.grabSideKeys(true)
+    bb10.updateSideKeys()
 end
 
 -- The active frame shows the open book.
