@@ -56,6 +56,10 @@ static struct item *head, *tail;
 static int speaking = -1;              /* id being spoken, or -1 */
 static tts_param_t pending[4];         /* parameter changes, applied between utterances */
 static int npending;
+static char pending_voice[128];        /* voice change, applied between utterances */
+/* The current settings, to reopen the engine with another voice. */
+static char cur_voice[128];
+static int cur_rate = 100, cur_pitch = 100, cur_volume = 100;
 #define MAX_EVENTS 64
 static kotts_event_t events[MAX_EVENTS];
 static int nevents;
@@ -102,11 +106,49 @@ static uint16_t *utf8_to_utf16(const char *in, size_t *bytes)
     return out;
 }
 
+static void set_param(tts_param_t *p, int id, int value);
+
+/* The voice can't be changed with ttsSetParams once the instance is open (it fails, whatever
+ * the language parameter): reopen the engine instead. */
+static int open_engine(const char *voice)
+{
+    tts_param_t p[4];
+    memset(p, 0, sizeof p);
+    p[0].id = TTS_VOICE;
+    strncpy(p[0].v.s, voice, sizeof p[0].v.s - 1);
+    set_param(&p[1], TTS_RATE, cur_rate);
+    set_param(&p[2], TTS_PITCH, cur_pitch);
+    set_param(&p[3], TTS_VOLUME, cur_volume);
+    /* NOTE: the data path argument is ignored (hard-coded /usr/tts/nuance/ve/data). */
+    if (ttsInitialize("/usr/tts/nuance/ve/data") != 0)
+        return -2;
+    if (ttsOpenInstance(p, 4) != 0) {
+        ttsUnInitialize();
+        return -3;
+    }
+    strncpy(cur_voice, voice, sizeof cur_voice - 1);
+    return 0;
+}
+
 static void *work(void *arg)
 {
     (void)arg;
     pthread_mutex_lock(&lock);
     while (running) {
+        if (pending_voice[0]) {
+            char voice[128], old[128];
+            strncpy(voice, pending_voice, sizeof voice);
+            pending_voice[0] = 0;
+            strncpy(old, cur_voice, sizeof old);
+            pthread_mutex_unlock(&lock);
+            if (strcmp(voice, old) != 0) {
+                ttsUnInitialize();
+                if (open_engine(voice) != 0)
+                    open_engine(old);
+            }
+            pthread_mutex_lock(&lock);
+            continue;
+        }
         if (npending) {
             tts_param_t p[4];
             int n = npending;
@@ -173,19 +215,11 @@ int kotts_init(const char *data, const char *voice, int rate, int pitch, int vol
             return -1;
         }
     }
-    if (ttsInitialize(data ? data : "/usr/tts/nuance/ve/data") != 0)
-        return -2;
-    tts_param_t p[4];
-    memset(p, 0, sizeof p);
-    p[0].id = TTS_VOICE;
-    strncpy(p[0].v.s, voice && *voice ? voice : "alice", sizeof p[0].v.s - 1);
-    set_param(&p[1], TTS_RATE, rate);
-    set_param(&p[2], TTS_PITCH, pitch);
-    set_param(&p[3], TTS_VOLUME, volume);
-    if (ttsOpenInstance(p, 4) != 0) {
-        ttsUnInitialize();
-        return -3;
-    }
+    (void)data;
+    cur_rate = rate, cur_pitch = pitch, cur_volume = volume;
+    int ret = open_engine(voice && *voice ? voice : "alice");
+    if (ret != 0)
+        return ret;
     running = 1;
     nevents = 0;
     if (pthread_create(&worker, NULL, work, NULL) != 0) {
@@ -209,6 +243,12 @@ void kotts_set_params(int rate, int pitch, int volume)
 {
     pthread_mutex_lock(&lock);
     if (rate)
+        cur_rate = rate;
+    if (pitch)
+        cur_pitch = pitch;
+    if (volume)
+        cur_volume = volume;
+    if (rate)
         set_param(&pending[pending_index(TTS_RATE)], TTS_RATE, rate);
     if (pitch)
         set_param(&pending[pending_index(TTS_PITCH)], TTS_PITCH, pitch);
@@ -218,14 +258,12 @@ void kotts_set_params(int rate, int pitch, int volume)
     pthread_mutex_unlock(&lock);
 }
 
-/* Change the voice (e.g. "ava": its data must be mounted), from the next utterance. */
+/* Change the voice (e.g. "ava": its data must be mounted), from the next utterance
+ * (reopening the engine: ~1 s). On failure, the previous voice stays. */
 void kotts_set_voice(const char *voice)
 {
     pthread_mutex_lock(&lock);
-    tts_param_t *p = &pending[pending_index(TTS_VOICE)];
-    memset(p, 0, sizeof *p);
-    p->id = TTS_VOICE;
-    strncpy(p->v.s, voice, sizeof p->v.s - 1);
+    strncpy(pending_voice, voice, sizeof pending_voice - 1);
     pthread_cond_signal(&wake);
     pthread_mutex_unlock(&lock);
 }
