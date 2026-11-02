@@ -142,7 +142,20 @@ function Cover:update()
     end
     local ok, err = pcall(function()
         local bb = self:_render(w, h, night)
-        local dir = DataStorage:getDataDir() .. "/cache"
+        -- Own subdirectory: DocCache treats every plain file in cache/ as one of its items,
+        -- and a PNG we delete behind its back made DocCache:serialize() crash on close.
+        local lfs = require("libs/libkoreader-lfs")
+        local cache = DataStorage:getDataDir() .. "/cache"
+        local dir = cache .. "/bb10-cover"
+        if lfs.attributes(dir, "mode") ~= "directory" then
+            lfs.mkdir(dir)
+            -- Leftovers of older builds, which wrote them straight into cache/.
+            for name in lfs.dir(cache) do
+                if name:match("^bb10%-cover%-.*%.png$") then
+                    os.remove(cache .. "/" .. name)
+                end
+            end
+        end
         self.file_serial = self.file_serial + 1
         local file = string.format("%s/bb10-cover-%d-%d.png", dir, os.time(), self.file_serial)
         -- Our color buffers are BGR (Device:hasBGRFrameBuffer).
@@ -154,7 +167,6 @@ function Cover:update()
             error("navigator_window_cover_update: " .. tostring(set_err))
         end
         -- Drop the older ones (also those left by previous runs).
-        local lfs = require("libs/libkoreader-lfs")
         for name in lfs.dir(dir) do
             if name:match("^bb10%-cover%-.*%.png$") and dir .. "/" .. name ~= file then
                 os.remove(dir .. "/" .. name)
