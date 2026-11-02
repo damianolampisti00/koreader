@@ -66,8 +66,12 @@ function DocCache:serialize(doc_path)
     local cached_size = 0
     local sorted_caches = {}
     for _, file in pairs(self.cached) do
-        table.insert(sorted_caches, {file=file, time=lfs.attributes(file, "access")})
-        cached_size = cached_size + (lfs.attributes(file, "size") or 0)
+        -- Skip files removed since the snapshot was taken (a nil time would break the sort).
+        local attr = lfs.attributes(file)
+        if attr then
+            table.insert(sorted_caches, {file=file, time=attr.access, size=attr.size})
+            cached_size = cached_size + attr.size
+        end
     end
     table.sort(sorted_caches, function(v1, v2) return v1.time > v2.time end)
 
@@ -107,7 +111,7 @@ function DocCache:serialize(doc_path)
         -- discard the least recently used cache
         local discarded = table.remove(sorted_caches)
         if discarded then
-            cached_size = cached_size - lfs.attributes(discarded.file, "size")
+            cached_size = cached_size - discarded.size
             os.remove(discarded.file)
         else
             logger.warn("Cache accounting is broken")
